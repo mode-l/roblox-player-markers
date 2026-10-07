@@ -85,6 +85,7 @@ end
 local settings = { highlight = true }
 local connections = {}
 local cleanups = {}
+local active = true
 table.insert(cleanups, function() rigUtility:SetPaused(false) end)
 local speedControl = { enabled = false, speed = 500, installed = false, originals = setmetatable({}, { __mode = "k" }) }
 function speedControl:Install()
@@ -97,7 +98,11 @@ function speedControl:Install()
 	if type(debug) ~= "table" or type(debug.info) ~= "function" or type(debug.getupvalues) ~= "function" then
 		table.insert(missing, "debug.info/getupvalues")
 	end
-	if #missing > 0 then warn("[Speed] missing: " .. table.concat(missing, ", ")); return false end
+	if #missing > 0 then
+		self.warning = "Нет API перехватчиков: " .. table.concat(missing, ", ")
+		warn("[Speed] " .. self.warning)
+		return false
+	end
 	local controller = self
 	local previousIndex
 	local indexWrapper = function(object, key, value)
@@ -142,11 +147,15 @@ function speedControl:Apply()
 	if humanoid then
 		if self.originals[humanoid] == nil then self.originals[humanoid] = humanoid.WalkSpeed end
 		if humanoid.WalkSpeed ~= self.speed then humanoid.WalkSpeed = self.speed end
+		if self.onStatus then self.onStatus("WalkSpeed: " .. tostring(humanoid.WalkSpeed) .. (self.warning and "\n" .. self.warning or "")) end
+	elseif self.onStatus then
+		self.onStatus("Ожидание персонажа")
 	end
 end
 function speedControl:SetEnabled(value)
 	if value then
-		if not self:Install() then return false end
+		local installed, result = pcall(function() return self:Install() end)
+		if not installed then self.warning = "Ошибка перехватчиков: " .. tostring(result) end
 		self.enabled = true
 		self:Apply()
 		if not self.connection then
@@ -159,12 +168,12 @@ function speedControl:SetEnabled(value)
 		if self.connection then self.connection:Disconnect(); self.connection = nil end
 		for humanoid, speed in pairs(self.originals) do pcall(function() humanoid.WalkSpeed = speed end) end
 		table.clear(self.originals)
+		if self.onStatus then self.onStatus("Скорость выключена") end
 	end
 	return true
 end
 table.insert(cleanups, function() speedControl:SetEnabled(false) end)
 local ownedMarkers = {}
-local active = true
 local gui = Instance.new("ScreenGui")
 gui.Name = "PlayerMarkersPanel"
 gui.ResetOnSpawn = false
@@ -326,6 +335,20 @@ speedInput.ClearTextOnFocus = false
 speedInput.Text = "500"
 speedInput.PlaceholderText = "Скорость: 16–500"
 speedInput.Parent = panel
+local speedStatus = Instance.new("TextLabel")
+speedStatus.Position = UDim2.fromOffset(180, 340)
+speedStatus.Size = UDim2.new(1, -192, 0, 76)
+speedStatus.BackgroundTransparency = 1
+speedStatus.TextColor3 = Color3.fromRGB(190, 200, 215)
+speedStatus.Font = Enum.Font.Gotham
+speedStatus.TextSize = 12
+speedStatus.TextWrapped = true
+speedStatus.TextXAlignment = Enum.TextXAlignment.Left
+speedStatus.Text = "Скорость выключена"
+speedStatus.Parent = panel
+speedControl.onStatus = function(message)
+	if speedStatus.Parent then speedStatus.Text = message end
+end
 speedInput.FocusLost:Connect(function()
 	local number = tonumber(speedInput.Text)
 	if number and number == number and math.abs(number) < math.huge then
@@ -474,6 +497,7 @@ local function showTab()
 	rigButton.Visible = highlightButton.Visible
 	speedButton.Visible = highlightButton.Visible
 	speedInput.Visible = highlightButton.Visible
+	speedStatus.Visible = highlightButton.Visible
 	analyticsButton.Visible = highlightButton.Visible
 	mapView.Visible = expanded and selectedTab == "map"
 	playersTab.Visible = expanded
