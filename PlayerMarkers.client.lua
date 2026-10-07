@@ -8,10 +8,13 @@ local playerGui = localPlayer:WaitForChild("PlayerGui")
 local oldGui = playerGui:FindFirstChild("PlayerMarkersPanel")
 if oldGui then
 	oldGui:Destroy()
+	-- Let older versions finish their deferred cleanup before adding new markers.
+	task.wait()
 end
 
 local settings = { highlight = true, names = true }
 local connections = {}
+local ownedMarkers = {}
 local active = true
 local gui = Instance.new("ScreenGui")
 gui.Name = "PlayerMarkersPanel"
@@ -34,15 +37,9 @@ end
 table.insert(connections, gui.Destroying:Connect(function()
 	active = false
 	for _, connection in connections do connection:Disconnect() end
-	for _, player in Players:GetPlayers() do
-		local character = player.Character
-		if player ~= localPlayer and character then
-			for _, name in { "PlayerMarker", "PlayerName" } do
-				local marker = character:FindFirstChild(name)
-				if marker then marker:Destroy() end
-			end
-		end
-	end
+	-- Deferred cleanup must never destroy markers created by a newer run.
+	for marker in ownedMarkers do marker:Destroy() end
+	table.clear(ownedMarkers)
 end))
 
 local panel = Instance.new("Frame")
@@ -168,13 +165,14 @@ local function markCharacter(player, character)
 	end
 
 	local head = character:WaitForChild("Head", 10)
-	if not active or not head or not character.Parent or player.Character ~= character then
+	if not active or not gui.Parent or not head or not character.Parent or player.Character ~= character then
 		return
 	end
 
-	if character:FindFirstChild("PlayerMarker") then
-		updateMarkers()
-		return
+	for _, name in { "PlayerMarker", "PlayerName" } do
+		local previous = character:FindFirstChild(name)
+		if previous and ownedMarkers[previous] then return end
+		if previous then previous:Destroy() end
 	end
 
 	local highlight = Instance.new("Highlight")
@@ -187,6 +185,8 @@ local function markCharacter(player, character)
 	highlight.OutlineTransparency = 0
 	highlight.Enabled = settings.highlight
 	highlight.Parent = character
+	ownedMarkers[highlight] = true
+	highlight.Destroying:Once(function() ownedMarkers[highlight] = nil end)
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "PlayerName"
@@ -196,6 +196,8 @@ local function markCharacter(player, character)
 	billboard.AlwaysOnTop = true
 	billboard.Enabled = settings.names
 	billboard.Parent = character
+	ownedMarkers[billboard] = true
+	billboard.Destroying:Once(function() ownedMarkers[billboard] = nil end)
 
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
