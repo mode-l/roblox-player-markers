@@ -17,10 +17,12 @@ for _, obj in getgc(true) do
 	end
 end
 
+local rigUtility
 do
-	local rigUtility = {
+	rigUtility = {
 		Players = game:GetService("Players"),
 		ReplicatedStorage = game:GetService("ReplicatedStorage"),
+		disabled = {},
 	}
 	function rigUtility.GetConnections(object, signalName)
 		local ok, result = pcall(function() return getconnections(object[signalName]) end)
@@ -28,14 +30,25 @@ do
 		warn("failed to getconnections: " .. tostring(result))
 		return nil
 	end
-	function rigUtility.Disconnect(conns)
+	function rigUtility:SetPaused(paused)
 		local patched = 0
-		for _, connection in pairs(conns) do
-			local ok, err = pcall(function() connection:Disconnect() end)
-			if ok then patched += 1 else warn("failed to disconnect: " .. tostring(err)) end
+		local conns = paused and self:init() or self.disabled
+		if not conns then return false end
+		for key, connection in pairs(conns) do
+			local ok, err = pcall(function()
+				if paused then
+					if connection.Enabled == false then return end
+					connection:Disable()
+					self.disabled[connection] = connection
+				else
+					connection:Enable()
+					self.disabled[key] = nil
+				end
+				patched += 1
+			end)
+			if not ok then warn("failed to toggle RigSync: " .. tostring(err)) end
 		end
-		warn("patched: " .. patched .. " connections")
-		return patched
+		return not paused or patched > 0
 	end
 	function rigUtility:init()
 		self.LocalPlayer = self.Players.LocalPlayer
@@ -54,9 +67,8 @@ do
 			return
 		end
 		local conns = self.GetConnections(remote, "OnClientEvent")
-		if conns then return self.Disconnect(conns) end
+		return conns
 	end
-	rigUtility:init()
 end
 
 local Players = game:GetService("Players")
@@ -73,6 +85,7 @@ end
 local settings = { highlight = true }
 local connections = {}
 local cleanups = {}
+table.insert(cleanups, function() rigUtility:SetPaused(false) end)
 local ownedMarkers = {}
 local active = true
 local gui = Instance.new("ScreenGui")
@@ -210,6 +223,19 @@ local function makeButton(text, y)
 end
 
 local highlightButton = makeButton("", 60)
+local rigPaused = false
+local rigButton = makeButton("RigSync: ВКЛ", 116)
+rigButton.BackgroundColor3 = Color3.fromRGB(32, 92, 118)
+rigButton.Activated:Connect(function()
+	local nextState = not rigPaused
+	if rigUtility:SetPaused(nextState) then
+		rigPaused = nextState
+		rigButton.Text = rigPaused and "RigSync: ВЫКЛ" or "RigSync: ВКЛ"
+		rigButton.BackgroundColor3 = rigPaused and Color3.fromRGB(56, 62, 73) or Color3.fromRGB(32, 92, 118)
+	else
+		warn("RigSync was not paused; check executor support and console")
+	end
+end)
 local nav = Instance.new("ScrollingFrame")
 nav.Position = UDim2.fromOffset(12, 48)
 nav.Size = UDim2.new(0, 156, 1, -92)
@@ -326,6 +352,7 @@ local function refreshMap()
 end
 local function showTab()
 	highlightButton.Visible = expanded and selectedTab == "players"
+	rigButton.Visible = highlightButton.Visible
 	mapView.Visible = expanded and selectedTab == "map"
 	playersTab.Visible = expanded
 	mapTab.Visible = expanded
