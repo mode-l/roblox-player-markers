@@ -43,7 +43,7 @@ table.insert(connections, gui.Destroying:Connect(function()
 end))
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.fromOffset(272, 202)
+panel.Size = UDim2.fromOffset(360, 370)
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
 panel.BackgroundColor3 = Color3.fromRGB(24, 28, 35)
@@ -112,8 +112,114 @@ local function makeButton(text, y)
 	return button
 end
 
-local highlightButton = makeButton("", 52)
-local namesButton = makeButton("", 108)
+local highlightButton = makeButton("", 100)
+local namesButton = makeButton("", 156)
+local playersTab = makeButton("Игроки", 48)
+playersTab.Size = UDim2.new(0.5, -18, 0, 40)
+local mapTab = makeButton("Карта", 48)
+mapTab.Size = playersTab.Size
+mapTab.Position = UDim2.new(0.5, 6, 0, 48)
+local mapView = Instance.new("ScrollingFrame")
+mapView.Position = UDim2.fromOffset(12, 100)
+mapView.Size = UDim2.new(1, -24, 1, -144)
+mapView.BackgroundTransparency = 1
+mapView.BorderSizePixel = 0
+mapView.ScrollBarThickness = 5
+mapView.AutomaticCanvasSize = Enum.AutomaticSize.Y
+mapView.CanvasSize = UDim2.new()
+mapView.Visible = false
+mapView.Parent = panel
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 8)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = mapView
+local function mapLine(text, heading)
+	local line = Instance.new("TextLabel")
+	line.Size = UDim2.new(1, -10, 0, 0)
+	line.AutomaticSize = Enum.AutomaticSize.Y
+	line.BackgroundTransparency = 1
+	line.TextWrapped = true
+	line.TextXAlignment = Enum.TextXAlignment.Left
+	line.TextYAlignment = Enum.TextYAlignment.Top
+	line.TextColor3 = heading and Color3.fromRGB(100, 205, 245) or Color3.fromRGB(225, 231, 240)
+	line.Font = heading and Enum.Font.GothamBold or Enum.Font.Gotham
+	line.TextSize = heading and 16 or 13
+	line.Text = text
+	line.LayoutOrder = #mapView:GetChildren()
+	line.Parent = mapView
+end
+local selectedTab = "players"
+local expanded = true
+local search
+local refreshing = false
+local function refreshMap()
+	if refreshing then return end
+	refreshing = true
+	for _, child in mapView:GetChildren() do
+		if child:IsA("TextLabel") then child:Destroy() end
+	end
+	mapLine("Загрузка карты…")
+	task.spawn(function()
+		local ok, result = pcall(function()
+			if not search then
+				local module = game:GetService("ReplicatedStorage"):FindFirstChild("EggSearch")
+				local library
+				if module and module:IsA("ModuleScript") then
+					library = require(module)
+				else
+					library = loadstring(game:HttpGet("https://raw.githubusercontent.com/mode-l/roblox-player-markers/main/EggSearch.lua"))()
+				end
+				search = library.new()
+			end
+			return search.GetMatchingFieldEggs()
+		end)
+		refreshing = false
+		if not active or not gui.Parent then return end
+		for _, child in mapView:GetChildren() do
+			if child:IsA("TextLabel") then child:Destroy() end
+		end
+		if not ok then mapLine("Не удалось прочитать карту:\n" .. tostring(result)); return end
+		local groups = {}
+		for id, area in pairs(search.Areas) do
+			groups[tostring(id)] = { name = type(area) == "table" and (area.DisplayName or area.Name) or tostring(id), eggs = {} }
+		end
+		for _, item in ipairs(result) do
+			local id = tostring(item.record.AreaId or "Без зоны")
+			groups[id] = groups[id] or { name = id, eggs = {} }
+			table.insert(groups[id].eggs, item)
+		end
+		local ids = {}
+		for id in pairs(groups) do table.insert(ids, id) end
+		table.sort(ids)
+		if #ids == 0 then mapLine("Локации и яйца не найдены") end
+		for _, id in ipairs(ids) do
+			local group = groups[id]
+			mapLine(tostring(group.name) .. " · " .. #group.eggs .. " яиц", true)
+			if #group.eggs == 0 then mapLine("Нет доступных яиц") end
+			for _, item in ipairs(group.eggs) do
+				local egg = item.record
+				local category = egg.AssetCategory or egg.Category or egg.Name
+				local asset = category and search.Assets[category]
+				local name = type(asset) == "table" and (asset.DisplayName or asset.Name) or category
+				local mutations = table.concat(egg.Mutations or {}, ", ")
+				mapLine("Entity: " .. tostring(name or "Неизвестно") .. "\nПредмет: яйцо · " .. item.rarity
+					.. " · баллы: " .. item.score .. (mutations ~= "" and "\nМутации: " .. mutations or ""))
+			end
+		end
+	end)
+end
+local function showTab()
+	highlightButton.Visible = expanded and selectedTab == "players"
+	namesButton.Visible = highlightButton.Visible
+	mapView.Visible = expanded and selectedTab == "map"
+	playersTab.Visible = expanded
+	mapTab.Visible = expanded
+	playersTab.BackgroundColor3 = selectedTab == "players" and Color3.fromRGB(32, 92, 118) or Color3.fromRGB(48, 53, 62)
+	mapTab.BackgroundColor3 = selectedTab == "map" and Color3.fromRGB(32, 92, 118) or Color3.fromRGB(48, 53, 62)
+end
+playersTab.Activated:Connect(function() selectedTab = "players"; showTab() end)
+mapTab.Activated:Connect(function() selectedTab = "map"; showTab(); refreshMap() end)
+showTab()
 local function renderButtons()
 	for _, item in { { highlightButton, "Подсветка", settings.highlight }, { namesButton, "Имена", settings.names } } do
 		item[1].Text = item[2] .. (item[3] and "  •  ВКЛ" or "  •  ВЫКЛ")
@@ -142,7 +248,7 @@ collapse.Font = Enum.Font.GothamBold
 collapse.TextSize = 24
 collapse.Parent = panel
 local footer = Instance.new("TextLabel")
-footer.Position = UDim2.fromOffset(12, 166)
+footer.Position = UDim2.new(0, 12, 1, -32)
 footer.Size = UDim2.new(1, -24, 0, 24)
 footer.BackgroundTransparency = 1
 footer.Text = "Right Shift — скрыть / показать"
@@ -151,11 +257,10 @@ footer.Font = Enum.Font.Gotham
 footer.TextSize = 11
 footer.Parent = panel
 collapse.Activated:Connect(function()
-	local expanded = not highlightButton.Visible
-	highlightButton.Visible = expanded
-	namesButton.Visible = expanded
+	expanded = not expanded
+	showTab()
 	footer.Visible = expanded
-	panel.Size = UDim2.fromOffset(272, expanded and 202 or 48)
+	panel.Size = UDim2.fromOffset(360, expanded and 370 or 48)
 	collapse.Text = expanded and "−" or "+"
 end)
 
