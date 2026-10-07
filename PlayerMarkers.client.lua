@@ -17,6 +17,48 @@ for _, obj in getgc(true) do
 	end
 end
 
+do
+	local rigUtility = {
+		Players = game:GetService("Players"),
+		ReplicatedStorage = game:GetService("ReplicatedStorage"),
+	}
+	function rigUtility.GetConnections(object, signalName)
+		local ok, result = pcall(function() return getconnections(object[signalName]) end)
+		if ok and type(result) == "table" then return result end
+		warn("failed to getconnections: " .. tostring(result))
+		return nil
+	end
+	function rigUtility.Disconnect(conns)
+		local patched = 0
+		for _, connection in pairs(conns) do
+			local ok, err = pcall(function() connection:Disconnect() end)
+			if ok then patched += 1 else warn("failed to disconnect: " .. tostring(err)) end
+		end
+		warn("patched: " .. patched .. " connections")
+		return patched
+	end
+	function rigUtility:init()
+		self.LocalPlayer = self.Players.LocalPlayer
+		if not self.LocalPlayer then warn("failed to get localplayer"); return end
+		if type(getconnections) ~= "function" then
+			warn("Unsupported executor: missing getconnections")
+			return
+		end
+		local packages = self.ReplicatedStorage:FindFirstChild("Packages")
+		if not packages then warn("failed to get Packages"); return end
+		local networking = packages:FindFirstChild("Networking")
+		if not networking then warn("failed to get Networking"); return end
+		local remote = networking:FindFirstChild("RE/RigSync/Refresh")
+		if not remote or not remote:IsA("RemoteEvent") then
+			warn("failed to get RE/RigSync/Refresh RemoteEvent")
+			return
+		end
+		local conns = self.GetConnections(remote, "OnClientEvent")
+		if conns then return self.Disconnect(conns) end
+	end
+	rigUtility:init()
+end
+
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local localPlayer = Players.LocalPlayer
