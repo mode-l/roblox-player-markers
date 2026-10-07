@@ -2,6 +2,7 @@
 -- With StreamingEnabled, only characters loaded on this client can be marked.
 
 local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
 local oldGui = playerGui:FindFirstChild("PlayerMarkersPanel")
@@ -46,7 +47,8 @@ end))
 
 local panel = Instance.new("Frame")
 panel.Size = UDim2.fromOffset(272, 202)
-panel.Position = UDim2.new(0, 16, 0.5, -101)
+panel.AnchorPoint = Vector2.new(0.5, 0.5)
+panel.Position = UDim2.fromScale(0.5, 0.5)
 panel.BackgroundColor3 = Color3.fromRGB(24, 28, 35)
 panel.BorderSizePixel = 0
 panel.Parent = gui
@@ -64,6 +66,38 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 18
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = panel
+title.Active = true
+
+local dragInput
+local dragStart
+local panelStart
+table.insert(connections, title.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+		dragStart = input.Position
+		panelStart = panel.Position
+	end
+end))
+table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+	if not dragInput then return end
+	if input == dragInput or (dragInput.UserInputType == Enum.UserInputType.MouseButton1
+		and input.UserInputType == Enum.UserInputType.MouseMovement) then
+		local delta = input.Position - dragStart
+		panel.Position = UDim2.new(panelStart.X.Scale, panelStart.X.Offset + delta.X,
+			panelStart.Y.Scale, panelStart.Y.Offset + delta.Y)
+	end
+end))
+table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+	if input == dragInput then dragInput = nil end
+end))
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
+	if processed or UserInputService:GetFocusedTextBox() then return end
+	if input.KeyCode == Enum.KeyCode.RightShift then
+		panel.Visible = not panel.Visible
+		dragInput = nil
+	end
+end))
 
 local function makeButton(text, y)
 	local button = Instance.new("TextButton")
@@ -114,7 +148,7 @@ local footer = Instance.new("TextLabel")
 footer.Position = UDim2.fromOffset(12, 166)
 footer.Size = UDim2.new(1, -24, 0, 24)
 footer.BackgroundTransparency = 1
-footer.Text = "Настройки сохраняются при возрождении"
+footer.Text = "Right Shift — скрыть / показать"
 footer.TextColor3 = Color3.fromRGB(172, 183, 198)
 footer.Font = Enum.Font.Gotham
 footer.TextSize = 11
