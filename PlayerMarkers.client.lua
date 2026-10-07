@@ -199,7 +199,7 @@ local function refreshMap()
 				if module and module:IsA("ModuleScript") then
 					library = require(module)
 				else
-					library = loadstring(game:HttpGet("https://raw.githubusercontent.com/mode-l/roblox-player-markers/main/EggSearch.lua"))()
+					library = loadstring(game:HttpGet("https://raw.githubusercontent.com/mode-l/roblox-player-markers/8f5b4fc588bcd7e8bb79e73d1b814b5d534267f5/EggSearch.lua"))()
 				end
 				search = library.new()
 			end
