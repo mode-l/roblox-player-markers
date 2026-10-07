@@ -179,6 +179,9 @@ local function refreshMap()
 			if child:IsA("TextLabel") then child:Destroy() end
 		end
 		if not ok then mapLine("Не удалось прочитать карту:\n" .. tostring(result)); return end
+		for _, warning in ipairs(search.Diagnostics or {}) do
+			mapLine("Каталог недоступен; данные могут быть неполными:\n" .. warning)
+		end
 		local groups = {}
 		for id, area in pairs(search.Areas) do
 			groups[tostring(id)] = { name = type(area) == "table" and (area.DisplayName or area.Name) or tostring(id), eggs = {} }

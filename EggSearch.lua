@@ -87,23 +87,38 @@ end
 
 function EggSearch.new(config)
 	config = config or {}
+	local diagnostics = {}
+	local replicatedStorage = game:GetService("ReplicatedStorage")
+	local function loadModule(folderName, moduleName, required)
+		local folder = replicatedStorage:WaitForChild(folderName, 6)
+		local preferred = folder and folder:WaitForChild(moduleName, 6)
+		local candidates = {}
+		if preferred and preferred:IsA("ModuleScript") then table.insert(candidates, preferred) end
+		for _, instance in ipairs(replicatedStorage:GetDescendants()) do
+			if instance:IsA("ModuleScript") and instance.Name == moduleName and instance ~= preferred then
+				table.insert(candidates, instance)
+			end
+		end
+		local failures = {}
+		for _, module in ipairs(candidates) do
+			local ok, value = pcall(require, module)
+			if ok and type(value) == "table" then return value end
+			table.insert(failures, module:GetFullName() .. ": " .. tostring(value))
+		end
+		local message = folderName .. "." .. moduleName .. ": "
+			.. (#failures > 0 and table.concat(failures, "\n") or "ModuleScript не найден")
+		if required then error(message, 0) end
+		table.insert(diagnostics, message)
+		return nil
+	end
 	local eggState = config.EggState
 	if not eggState then
-		local replicatedStorage = game:GetService("ReplicatedStorage")
-		local client = replicatedStorage:WaitForChild("Client", 10)
-		assert(client, "ReplicatedStorage.Client was not found")
-		local module = client:WaitForChild("EggState", 10)
-		assert(module and module:IsA("ModuleScript"), "Client.EggState ModuleScript was not found")
-		eggState = require(module)
+		eggState = loadModule("Client", "EggState", true)
 	end
 	if not config.GetEggRarityInfo then
-		local data = game:GetService("ReplicatedStorage"):WaitForChild("Data", 10)
-		assert(data, "ReplicatedStorage.Data was not found")
 		for key, name in pairs({ AssetsData = "Assets", AreasData = "Areas", RarityData = "Rarity" }) do
 			if not config[key] then
-				local module = data:WaitForChild(name, 10)
-				assert(module and module:IsA("ModuleScript"), "Data." .. name .. " was not found")
-				config[key] = require(module)
+				config[key] = loadModule("Data", name, false)
 			end
 		end
 	end
@@ -115,6 +130,7 @@ function EggSearch.new(config)
 		return EggSearch.IsBigEgg(egg, config)
 	end
 	local search = {}
+	search.Diagnostics = diagnostics
 	search.Areas = config.AreasData and (config.AreasData.Directory or config.AreasData) or {}
 	search.Assets = config.AssetsData and (config.AssetsData.Directory or config.AssetsData) or {}
 
