@@ -113,7 +113,7 @@ function EggSearch.new(config)
 	end
 	local eggState = config.EggState
 	if not eggState then
-		eggState = loadModule("Client", "EggState", true)
+		eggState = loadModule("Client", "EggState", false)
 	end
 	if not config.GetEggRarityInfo then
 		for key, name in pairs({ AssetsData = "Assets", AreasData = "Areas", RarityData = "Rarity" }) do
@@ -122,7 +122,19 @@ function EggSearch.new(config)
 			end
 		end
 	end
-	assert(type(eggState.ReadFieldEggs) == "function", "ReadFieldEggs is required")
+	local function pickFn(module, ...)
+		if type(module) ~= "table" then return nil end
+		for index = 1, select("#", ...) do
+			local candidate = module[select(index, ...)]
+			if type(candidate) == "function" then return candidate end
+		end
+		return nil
+	end
+	local readSnapshot = pickFn(eggState, "ReadFieldEggs", "GetAreaEggSnapshot")
+	local syncSnapshot = pickFn(eggState, "SyncFieldEggs", "RequestAreaEggSnapshot")
+	if eggState and not readSnapshot then
+		table.insert(diagnostics, "EggState: ReadFieldEggs / GetAreaEggSnapshot не найдены")
+	end
 	local getRarity = config.GetEggRarityInfo or function(egg)
 		return EggSearch.GetEggRarityInfo(egg, config)
 	end
@@ -133,10 +145,30 @@ function EggSearch.new(config)
 	search.Diagnostics = diagnostics
 	search.Areas = config.AreasData and (config.AreasData.Directory or config.AreasData) or {}
 	search.Assets = config.AssetsData and (config.AssetsData.Directory or config.AssetsData) or {}
+	local bindingDiagnosticCount = #diagnostics
+	local function validSnapshot(snapshot)
+		return type(snapshot) == "table" and type(snapshot.Records) == "table"
+	end
 
 	function search.GetMatchingFieldEggs(areaFilter, rarityFilter, mutationFilter)
-		local snapshot = eggState.ReadFieldEggs()
-		if not snapshot or type(snapshot.Records) ~= "table" then return {} end
+		while #diagnostics > bindingDiagnosticCount do table.remove(diagnostics) end
+		if not readSnapshot then return {} end
+		local ok, snapshot = pcall(readSnapshot)
+		if not ok or not validSnapshot(snapshot) then
+			if syncSnapshot then
+				local synced, syncError = pcall(syncSnapshot)
+				if not synced then table.insert(diagnostics, "Синхронизация EggState: " .. tostring(syncError)) end
+				ok, snapshot = pcall(readSnapshot)
+			end
+		end
+		if not ok then
+			table.insert(diagnostics, "Чтение EggState: " .. tostring(snapshot))
+			return {}
+		end
+		if not validSnapshot(snapshot) then
+			table.insert(diagnostics, "EggState пока не вернул snapshot.Records")
+			return {}
+		end
 		local result = {}
 		-- pairs supports both arrays and records keyed by Uid.
 		for key, egg in pairs(snapshot.Records) do
