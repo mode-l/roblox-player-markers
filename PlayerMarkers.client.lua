@@ -39,6 +39,45 @@ gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
+local utility = {
+	ProximityPromptService = game:GetService("ProximityPromptService"),
+	Players = Players,
+	conns = {},
+	originalDurations = setmetatable({}, { __mode = "k" }),
+}
+function utility:bind(signal, callback)
+	local ok, connection = pcall(function() return signal:Connect(callback) end)
+	if not ok then warn("failed to bind connection: " .. tostring(connection)); return nil end
+	self.conns[connection] = true
+	return connection
+end
+function utility:unbind(connection)
+	if not self.conns[connection] then return false end
+	local ok, err = pcall(function() connection:Disconnect() end)
+	if not ok then warn("failed to unbind: " .. tostring(err)); return false end
+	self.conns[connection] = nil
+	return true
+end
+function utility:init()
+	self.LocalPlayer = self.Players.LocalPlayer
+	if not self.LocalPlayer then warn("failed to get localplayer"); return nil end
+	if self.connection then self:unbind(self.connection) end
+	self.connection = self:bind(self.ProximityPromptService.PromptButtonHoldBegan, function(prompt, player)
+		if active and player == self.LocalPlayer and prompt.Name == "CarryAreaEgg" then
+			if self.originalDurations[prompt] == nil then self.originalDurations[prompt] = prompt.HoldDuration end
+			prompt.HoldDuration = 0
+		end
+	end)
+	return self.connection
+end
+table.insert(cleanups, function()
+	for connection in pairs(utility.conns) do utility:unbind(connection) end
+	for prompt, duration in pairs(utility.originalDurations) do
+		pcall(function() prompt.HoldDuration = duration end)
+	end
+end)
+utility:init()
+
 local function updateMarkers()
 	for _, player in Players:GetPlayers() do
 		local character = player.Character
