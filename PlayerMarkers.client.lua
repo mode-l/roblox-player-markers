@@ -14,6 +14,7 @@ end
 
 local settings = { highlight = true, names = true }
 local connections = {}
+local cleanups = {}
 local ownedMarkers = {}
 local active = true
 local gui = Instance.new("ScreenGui")
@@ -36,6 +37,7 @@ end
 
 table.insert(connections, gui.Destroying:Connect(function()
 	active = false
+	for _, cleanup in ipairs(cleanups) do pcall(cleanup) end
 	for _, connection in connections do connection:Disconnect() end
 	-- Deferred cleanup must never destroy markers created by a newer run.
 	for marker in ownedMarkers do marker:Destroy() end
@@ -43,7 +45,7 @@ table.insert(connections, gui.Destroying:Connect(function()
 end))
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.fromOffset(360, 370)
+panel.Size = UDim2.fromOffset(720, 500)
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.fromScale(0.5, 0.5)
 panel.BackgroundColor3 = Color3.fromRGB(24, 28, 35)
@@ -98,8 +100,8 @@ end))
 
 local function makeButton(text, y)
 	local button = Instance.new("TextButton")
-	button.Position = UDim2.fromOffset(12, y)
-	button.Size = UDim2.new(1, -24, 0, 48)
+	button.Position = UDim2.fromOffset(180, y)
+	button.Size = UDim2.new(1, -192, 0, 48)
 	button.BorderSizePixel = 0
 	button.Text = text
 	button.TextColor3 = Color3.fromRGB(240, 244, 250)
@@ -112,16 +114,32 @@ local function makeButton(text, y)
 	return button
 end
 
-local highlightButton = makeButton("", 100)
-local namesButton = makeButton("", 156)
+local highlightButton = makeButton("", 60)
+local namesButton = makeButton("", 116)
+local nav = Instance.new("ScrollingFrame")
+nav.Position = UDim2.fromOffset(12, 48)
+nav.Size = UDim2.new(0, 156, 1, -92)
+nav.BackgroundTransparency = 1
+nav.BorderSizePixel = 0
+nav.ScrollBarThickness = 4
+nav.AutomaticCanvasSize = Enum.AutomaticSize.Y
+nav.CanvasSize = UDim2.new()
+nav.Parent = panel
+local navLayout = Instance.new("UIListLayout")
+navLayout.Padding = UDim.new(0, 6)
+navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+navLayout.Parent = nav
 local playersTab = makeButton("Игроки", 48)
-playersTab.Size = UDim2.new(0.5, -18, 0, 40)
+playersTab.Parent = nav
+playersTab.Size = UDim2.new(1, -6, 0, 40)
+playersTab.LayoutOrder = 0
 local mapTab = makeButton("Карта", 48)
 mapTab.Size = playersTab.Size
-mapTab.Position = UDim2.new(0.5, 6, 0, 48)
+mapTab.Parent = nav
+mapTab.LayoutOrder = 1
 local mapView = Instance.new("ScrollingFrame")
-mapView.Position = UDim2.fromOffset(12, 100)
-mapView.Size = UDim2.new(1, -24, 1, -144)
+mapView.Position = UDim2.fromOffset(180, 48)
+mapView.Size = UDim2.new(1, -192, 1, -92)
 mapView.BackgroundTransparency = 1
 mapView.BorderSizePixel = 0
 mapView.ScrollBarThickness = 5
@@ -150,6 +168,7 @@ local function mapLine(text, heading)
 end
 local selectedTab = "players"
 local expanded = true
+local extraPages = {}
 local search
 local refreshing = false
 local function refreshMap()
@@ -217,6 +236,11 @@ local function showTab()
 	mapView.Visible = expanded and selectedTab == "map"
 	playersTab.Visible = expanded
 	mapTab.Visible = expanded
+	nav.Visible = expanded
+	for page, item in pairs(extraPages) do
+		page.Visible = expanded and selectedTab == item.id
+		item.button.BackgroundColor3 = selectedTab == item.id and Color3.fromRGB(32, 92, 118) or Color3.fromRGB(48, 53, 62)
+	end
 	playersTab.BackgroundColor3 = selectedTab == "players" and Color3.fromRGB(32, 92, 118) or Color3.fromRGB(48, 53, 62)
 	mapTab.BackgroundColor3 = selectedTab == "map" and Color3.fromRGB(32, 92, 118) or Color3.fromRGB(48, 53, 62)
 end
@@ -263,7 +287,7 @@ collapse.Activated:Connect(function()
 	expanded = not expanded
 	showTab()
 	footer.Visible = expanded
-	panel.Size = UDim2.fromOffset(360, expanded and 370 or 48)
+	panel.Size = UDim2.fromOffset(720, expanded and 500 or 48)
 	collapse.Text = expanded and "−" or "+"
 end)
 
@@ -338,3 +362,83 @@ table.insert(connections, Players.PlayerAdded:Connect(trackPlayer))
 for _, player in Players:GetPlayers() do
 	trackPlayer(player)
 end
+
+-- Import feature engines through our UI adapter; no upstream windows are created.
+local environment = (getgenv and getgenv()) or _G
+local libraries = {}
+environment.__EggPanelLibraries = libraries
+table.insert(cleanups, function()
+	if environment.__EggPanelLibraries == libraries then environment.__EggPanelLibraries = nil end
+end)
+local pageCounter = 1
+local host = {
+	notify = function(message)
+		if gui.Parent then footer.Text = tostring(message); footer.TextWrapped = true end
+		warn("[EggPanel] " .. tostring(message))
+	end,
+	toggle = function() panel.Visible = not panel.Visible end,
+	onCleanup = function(callback) table.insert(cleanups, callback) end,
+}
+function host.addPage(name)
+	pageCounter += 1
+	local page = Instance.new("ScrollingFrame")
+	page.Position = mapView.Position
+	page.Size = mapView.Size
+	page.BackgroundTransparency = 1
+	page.BorderSizePixel = 0
+	page.ScrollBarThickness = 5
+	page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	page.CanvasSize = UDim2.new()
+	page.Visible = false
+	page.Parent = panel
+	local list = Instance.new("UIListLayout")
+	list.Padding = UDim.new(0, 8)
+	list.SortOrder = Enum.SortOrder.LayoutOrder
+	list.Parent = page
+	local tab = makeButton(name, 0)
+	tab.Parent = nav
+	tab.Size = UDim2.new(1, -6, 0, 48)
+	tab.TextSize = 12
+	tab.TextWrapped = true
+	tab.LayoutOrder = pageCounter
+	local id = "feature" .. pageCounter
+	extraPages[page] = { id = id, button = tab }
+	tab.Activated:Connect(function() selectedTab = id; showTab() end)
+	return page
+end
+function host.removePage(page)
+	local item = extraPages[page]
+	if item then
+		item.button:Destroy()
+		extraPages[page] = nil
+		if selectedTab == item.id then selectedTab = "players"; showTab() end
+	end
+	page:Destroy()
+end
+task.spawn(function()
+	local ok, err = pcall(function()
+		local adapterSource = game:HttpGet("https://raw.githubusercontent.com/mode-l/roblox-player-markers/main/PanelControls.lua")
+		local adapterChunk, compileError = loadstring(adapterSource, "PanelControls")
+		assert(adapterChunk, compileError)
+		local adapter = adapterChunk()
+		if not active or not gui.Parent then return end
+		for _, name in ipairs({ "Boblo", "Oxide" }) do
+			libraries[name] = adapter.mount(host, name)
+			task.spawn(function()
+				local loaded, failure = pcall(function()
+					local source = game:HttpGet("https://raw.githubusercontent.com/mode-l/roblox-player-markers/main/" .. name .. "Integrated.lua")
+					local chunk, compileError = loadstring(source, name .. "Features")
+					assert(chunk, compileError)
+					if active and gui.Parent then chunk() end
+					local shutdown = name == "Boblo" and environment.__SAE_HUB_SHUTDOWN
+						or (name == "Oxide" and _G.OxideStealAnEgg and _G.OxideStealAnEgg.Unload)
+					if shutdown then
+						if active and gui.Parent then table.insert(cleanups, shutdown) else pcall(shutdown) end
+					end
+				end)
+				if not loaded then host.notify(name .. ": " .. tostring(failure)) end
+			end)
+		end
+	end)
+	if not ok then host.notify(tostring(err)) end
+end)
